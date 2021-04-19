@@ -56,15 +56,18 @@ module ElixirBuildpack::Utils
       STDOUT.print(stdout_and_stderr)
       Kernel.exit(1)
     end
+    stdout_and_stderr
   end
 
-  def command_in_build(command)
-    env = ElixirBuildpack::Main.config.env.merge('HOME' => ElixirBuildpack::Main.build_dir)
+  def command_in_build(command, env = nil)
+    env ||= ElixirBuildpack::Main.config.env
+    env = env.merge('HOME' => ElixirBuildpack::Main.build_dir)
     stdout_and_stderr, status = Open3.capture2e(env, command, chdir: ElixirBuildpack::Main.build_dir)
     if status.exitstatus != 0
       ElixirBuildpack::Main.logger.fatal("failed to run command: #{command.inspect}")
       STDOUT.print(stdout_and_stderr)
       Kernel.exit(1)
     end
+    stdout_and_stderr
   end
 end
