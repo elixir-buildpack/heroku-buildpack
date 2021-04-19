@@ -7,11 +7,17 @@ class ElixirBuildpack::Config
   include ElixirBuildpack::Utils
 
   LAST_RUN_FILE = 'last-run.yml'.freeze
-  CONFIG_FILE = '.elixir-buildpack.yml'.freeze
+
+  DEFAULT_CONFIG_FILE = '../../../.elixir-buildpack.yml'.freeze
+  DEFAULT_CONFIG_VALUE = ''.freeze
+  APP_CONFIG_FILE = '.elixir-buildpack.yml'.freeze
+
   LEGACY_CONFIG_FILE = 'elixir_buildpack.config'.freeze
   LEGACY_CONFIG_REGEX = /^([a-z_]+)=(.+)$/.freeze
 
-  EXCLUDED_ENV = %w[
+  ENV_REGEX = /\A([^=]+)=(.+)\z/.freeze
+
+  IGNORED_APP_ENV = %w[
     PATH
     GIT_DIR
     CPATH
@@ -19,6 +25,11 @@ class ElixirBuildpack::Config
     LD_PRELOAD
     LIBRARY_PATH
   ].freeze
+
+  DEFAULT_ENV = {
+    'MIX_ENV' => 'prod',
+    'LC_CTYPE' => 'en_US.utf8'
+  }.freeze
 
   attr_reader :otp_version,
     :elixir_version,
@@ -31,7 +42,8 @@ class ElixirBuildpack::Config
     :pre_compile_command,
     :compile_command,
     :post_compile_command,
-    :disable_cache
+    :disable_cache,
+    :legacy_compatability
 
   def self.load
     new(
@@ -45,49 +57,65 @@ class ElixirBuildpack::Config
     @build_dir = build_dir
     @cache_dir = cache_dir
     @env_dir = env_dir
-    load
+    @env = ENV.to_h
+    @legacy_compatability = false
+
+    logger.info('Configuring the Elixir buildpack')
+    load_config
+
+    if @otp_version.to_s.empty? || @elixir_version.to_s.empty?
+      exit_with_error('The OTP and Elixir versions need to be set if a config file is used!')
+    else
+      logger.debug("Using OTP: #{@otp_version}")
+      logger.debug("Using Elixir: #{@elixir_version}")
+    end
+
+    load_last_versions
+    set_stack
+    load_exported_environment
+    load_user_environment
+    load_default_environment
   end
 
   private
 
-  def load
-    logger.info('Configuring Elixir buildpack')
-
-    if File.exist?(File.join(@build_dir, CONFIG_FILE))
+  def load_config
+    if File.exist?(File.join(@build_dir, APP_CONFIG_FILE))
       logger.debug('Using config from app')
-      load_config
+      load_app_config
     elsif File.exist?(File.join(@build_dir, LEGACY_CONFIG_FILE))
       logger.warn('Using a legacy config')
       load_legacy_config
+      @legacy_compatability = true
     else
       logger.warn('Using default config')
+      load_default_config
     end
-
-    default_config
-    load_last_versions
-    set_stack
-    load_environment_variables
   end
 
-  def default_config
-    @otp_version ||= '23.3.1'
-    @elixir_version ||= '1.11.4'
-    @disable_build_cache ||= false
-    @release ||= false
-    @disable_cache ||= false
-    @pre_compile_command ||= ''
-    @compile_command ||= ''
-    @post_compile_command ||= ''
+  def load_default_config
+    default_config_file = File.expand_path(File.join(__dir__, DEFAULT_CONFIG_FILE))
+    load_config_file(default_config_file)
   end
 
-  def load_config
-    config = YAML.load_file(File.join(@build_dir, CONFIG_FILE))
-    exit_with_error('Invalid buildpack config') unless config.is_a?(Hash)
+  def load_app_config
+    load_config_file(File.join(@build_dir, APP_CONFIG_FILE))
+  end
 
-    config = config.
-             transform_values(&:to_s).
-             transform_values(&:strip).
-             reject { |_k, v| v.empty? }
+  def new_hash
+    Hash.new(DEFAULT_CONFIG_VALUE)
+  end
+
+  def load_config_file(file)
+    loaded_config = YAML.load_file(file)
+    exit_with_error('Invalid buildpack config') unless loaded_config.is_a?(Hash)
+
+    cleaned_config = loaded_config.
+                     transform_values(&:to_s).
+                     transform_values(&:strip).
+                     reject { |_k, v| v.empty? }
+
+    config = new_hash.merge(cleaned_config)
 
     @otp_version = config['otp_version']
     @elixir_version = config['elixir_version']
@@ -100,11 +128,13 @@ class ElixirBuildpack::Config
   end
 
   def load_legacy_config
-    config = File.readlines(File.join(@build_dir, LEGACY_CONFIG_FILE)).
-             map { |line| line.strip.match(LEGACY_CONFIG_REGEX) }.
-             compact.
-             map { |match| [match[0].strip, match[1].strip] }.
-             to_h
+    config = new_hash.merge(
+      File.readlines(File.join(@build_dir, LEGACY_CONFIG_FILE)).
+      map { |line| line.strip.match(LEGACY_CONFIG_REGEX) }.
+      compact.
+      map { |match| [match[1].strip, match[2].strip] }.
+      to_h
+    )
 
     @otp_version = config['erlang_version']
     @elixir_version = config['elixir_version']
@@ -116,9 +146,11 @@ class ElixirBuildpack::Config
   end
 
   def load_last_versions
-    file = File.join(@cache_dir, LAST_RUN_FILE)
-    if File.exist?(file)
-      last_versions = YAML.load_file(file)
+    last_run_file = File.join(@cache_dir, LAST_RUN_FILE)
+
+    if File.exist?(last_run_file)
+      logger.debug('Loading version information from last build')
+      last_versions = YAML.load_file(last_run_file).transform_values(&:to_s)
 
       @last_otp_version = last_versions['otp_version']
       @last_elixir_version = last_versions['elixir_version']
@@ -134,15 +166,41 @@ class ElixirBuildpack::Config
     logger.debug("Using stack: #{@stack}")
   end
 
-  def load_environment_variables
+  def load_exported_environment
+    buildpack_export = File.join(@build_dir, 'export')
+
+    if File.exist?(buildpack_export) && !File.file?(buildpack_export)
+      logger.warn('There is a folder named export in the app directory, this can cause issues if using multiple buildpacks!')
+      return
+    elsif !File.exist?(buildpack_export)
+      return
+    end
+
+    logger.debug('Loading environment from previous buildpack')
+
+    exported_env = command_in_build(". #{buildpack_export} >/dev/null 2>&1 && env", @env).
+                   split("\n").
+                   map { |line| line.match(ENV_REGEX) }.
+                   compact.
+                   map { |match| [match[1], match[2]] }.
+                   to_h
+
+    @env = exported_env
+  end
+
+  def load_user_environment
     logger.debug('Loading environment variables')
+
     loaded_env = Dir[File.join(@env_dir, '*')].map do |env_file|
                    exit_with_error("#{env_file} is not a file") unless File.file?(env_file)
                    [File.basename(env_file), File.read(env_file)]
-                 end.reject { |pair| EXCLUDED_ENV.include?(pair.first) }.to_h
+                 end.reject { |pair| IGNORED_APP_ENV.include?(pair.first) }.to_h
 
-    @env = ENV.to_h.merge(loaded_env)
+    @env = @env.merge(loaded_env)
+  end
 
-    @env['MIX_ENV'] ||= 'prod'
+  def load_default_environment
+    logger.debug('Setting default buildpack environment variables')
+    @env = new_hash.merge(DEFAULT_ENV).merge(@env)
   end
 end
