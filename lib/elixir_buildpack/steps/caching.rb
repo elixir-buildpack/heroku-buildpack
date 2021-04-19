@@ -95,19 +95,19 @@ class ElixirBuildpack::Caching
   end
 
   def restore_dep_cache
-    cache_dir = File.join(@cache_dir, 'deps')
-    cpdir(cache_dir, File.join(@build_dir, 'deps')) if Dir.exist?(cache_dir)
+    dep_cache_dir = File.join(@cache_dir, 'deps')
+    cpdir(dep_cache_dir, File.join(@build_dir, 'deps')) if Dir.exist?(dep_cache_dir)
   end
 
   def restore_build_cache
-    cache_dir = File.join(@cache_dir, 'build')
-    if (@otp_changed || @elixir_changed) && Dir.exist?(cache_dir)
-      rmdir(cache_dir)
+    build_cache_dir = File.join(@cache_dir, 'build')
+    if (@otp_changed || @elixir_changed) && Dir.exist?(build_cache_dir)
+      rmdir(build_cache_dir)
     elsif config.disable_build_cache
       logger.debug('Skipping build cache')
-      rmdir(cache_dir)
-    elsif Dir.exist?(cache_dir)
-      cpdir(cache_dir, File.join(@build_dir, '_build'))
+      rmdir(build_cache_dir)
+    elsif Dir.exist?(build_cache_dir)
+      cpdir(build_cache_dir, File.join(@build_dir, '_build'))
     end
   end
 
