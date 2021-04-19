@@ -83,17 +83,21 @@ class ElixirBuildpack::Main
 
     @logger.formatter = proc do |severity, _datetime, _progname, msg|
       case severity
+      when 'INFO'
+        "-----> #{msg}\n"
       when 'DEBUG'
         "       #{msg}\n"
       when 'WARN'
-        "       #{msg} <----------- Warning!\n"
+        paded_log_line(msg, 'Warning!')
       when 'ERROR'
-        "       #{msg} <----------- Error!\n"
+        paded_log_line(msg, 'Error!')
       when 'FATAL'
         "#{severity}: #{msg}\n"
-      else
-        "-----> #{msg}\n"
       end
     end
+  end
+
+  def paded_log_line(msg, tag, padding = 80)
+    "       #{msg} <-".ljust(padding, '-') + " #{tag}\n"
   end
 end
