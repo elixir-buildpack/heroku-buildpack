@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+require_relative '../lib/elixir_buildpack'
+
+ElixirBuildpack.initialize
+ElixirBuildpack.build_dir = File.expand_path(ARGV[0])
+ElixirBuildpack.detect
