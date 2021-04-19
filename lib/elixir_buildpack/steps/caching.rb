@@ -123,6 +123,8 @@ class ElixirBuildpack::Caching
   end
 
   def cache_build
+    return logger.debug('Skipping build cache') if config.disable_build_cache
+
     logger.debug('Saving app build cache')
     cpdir(File.join(@build_dir, '_build'), File.join(@cache_dir, 'build'))
   end
