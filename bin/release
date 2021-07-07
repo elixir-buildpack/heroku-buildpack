@@ -1,9 +1,5 @@
-#!/usr/bin/env bash
+#!/usr/bin/env ruby
+require_relative '../lib/elixir_buildpack'
 
-cat <<EOF
----
-addons:
-  []
-default_process_types:
-  web: mix run --no-halt
-EOF
+ElixirBuildpack.initialize
+ElixirBuildpack.release

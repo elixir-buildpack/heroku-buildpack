@@ -1,11 +1,6 @@
-#!/usr/bin/env bash
+#!/usr/bin/env ruby
+require_relative '../lib/elixir_buildpack'
 
-mix_file_url="$1/mix.exs"
-
-if [ -f $mix_file_url ];
-then
-  echo "Elixir"
-  exit 0
-else
-  exit 1
-fi
+ElixirBuildpack.initialize
+ElixirBuildpack.build_dir = File.expand_path(ARGV[0])
+ElixirBuildpack.detect

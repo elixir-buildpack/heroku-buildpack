@@ -1,0 +1,4 @@
+Layout/DotPosition:
+  EnforcedStyle: trailing
+Layout/ArgumentAlignment:
+  EnforcedStyle: with_fixed_indentation
